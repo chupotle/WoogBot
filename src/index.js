@@ -3,7 +3,6 @@ const axios = require('axios');
 const express = require('express');
 const bodyParser = require('body-parser');
 const qs = require('querystring');
-const ticket = require('./ticket');
 const signature = require('./verifySignature');
 const debug = require('debug')('slash-command-template:index');
 const repo = require('./repo')
@@ -35,63 +34,6 @@ app.get('/', (req, res) => {
  * Endpoint to receive /helpdesk slash command from Slack.
  * Checks verification token and opens a dialog to capture more info.
  */
-app.post('/command', (req, res) => {
-  // extract the slash command text, and trigger ID from payload
-  const { text, trigger_id } = req.body;
-  // Verify the signing secret
-  console.log(req.body);
-  if (signature.isVerified(req)) {
-    // create the dialog payload - includes the dialog structure, Slack API token,
-    // and trigger ID
-    const dialog = {
-      token: process.env.SLACK_ACCESS_TOKEN,
-      trigger_id,
-      dialog: JSON.stringify({
-        title: 'Submit a helpdesk ticket',
-        callback_id: 'submit-ticket',
-        submit_label: 'Submit',
-        elements: [
-          {
-            label: 'Title',
-            type: 'text',
-            name: 'title',
-            value: text,
-            hint: '30 second summary of the problem',
-          },
-          {
-            label: 'Description',
-            type: 'textarea',
-            name: 'description',
-            optional: true,
-          },
-          {
-            label: 'Urgency',
-            type: 'select',
-            name: 'urgency',
-            options: [
-              { label: 'Low', value: 'Low' },
-              { label: 'Medium', value: 'Medium' },
-              { label: 'High', value: 'High' },
-            ],
-          },
-        ],
-      }),
-    };
-
-    // open the dialog by calling dialogs.open method and sending the payload
-    axios.post(`${apiUrl}/dialog.open`, qs.stringify(dialog))
-      .then((result) => {
-        debug('dialog.open: %o', result.data);
-        res.send('');
-      }).catch((err) => {
-        debug('dialog.open call failed: %o', err);
-        res.sendStatus(500);
-      });
-  } else {
-    debug('Verification token mismatch');
-    res.sendStatus(404);
-  }
-});
 
 app.post('/mentionRole', (req, res) => {
   // extract the slash command text, and trigger ID from payload
@@ -104,7 +46,7 @@ app.post('/mentionRole', (req, res) => {
     const splitText = splitFirstSpace(text);
     var message;
     var attachment;
-    if(!!repo.checkRole(splitText[0])){
+    if(!!repo.roleExists(splitText[0])){
       var userIdList = repo.getUsersWithRole(splitText[0]);
       var append = !!userIdList ? userIdList.map(userId => "<@" + userId + ">").toString() : "";
       console.log(append);
@@ -118,6 +60,7 @@ app.post('/mentionRole', (req, res) => {
     }
     else{
       res.send("role not found");
+      throw "role not found";
     } 
     axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
       token: process.env.SLACK_ACCESS_TOKEN,
@@ -143,84 +86,102 @@ app.post('/getRole', (req, res) => {
   const { text, trigger_id } = req.body;
   const reqBody = req.body;
   // Verify the signing secret
-  checkAdmin(reqBody.user_id, function callback (isAdmin) {
-    if (signature.isVerified(req)) {
-      // create the dialog payload - includes the dialog structure, Slack API token,
-      // and trigger ID
-      var message;
-      const splitText = splitFirstSpace(text);
-      
-      if(!!repo.checkRole(splitText[0])){
-        repo.giveRole(reqBody.user_id, splitText[0])
-        message = `<@${reqBody.user_id}> role ${splitText[0]} successfully added`;
-      }
-      else{
-        message = `<@${reqBody.user_id}> role ${splitText[0]} exists`;
-      }
+  if (signature.isVerified(req)) {
+    // create the dialog payload - includes the dialog structure, Slack API token,
+    // and trigger ID
+    var message;
+    const splitText = splitFirstSpace(text);
 
-      axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
-        token: process.env.SLACK_ACCESS_TOKEN,
-        channel: reqBody.user_id,
-        as_user: true,
-        text: message
-      })).then((result) => {
-        debug('sendConfirmation: %o', result.data);
-        res.send('');
-      }).catch((err) => {
-        debug('sendConfirmation error: %o', err);
-        console.error(err);
-      });
-    } else {
-      debug('Verification token mismatch');
-      res.sendStatus(404);
+    if(!!repo.roleExists(splitText[0])){
+      repo.giveRole(reqBody.user_id, splitText[0])
+      message = `<@${reqBody.user_id}> role ${splitText[0]} successfully added`;
     }
-  });
+    else{
+      message = `<@${reqBody.user_id}> role ${splitText[0]} does not exist`;
+    }
+
+    axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+      token: process.env.SLACK_ACCESS_TOKEN,
+      channel: reqBody.user_id,
+      as_user: true,
+      text: message
+    })).then((result) => {
+      debug('sendConfirmation: %o', result.data);
+      res.send('');
+    }).catch((err) => {
+      debug('sendConfirmation error: %o', err);
+      console.error(err);
+    });
+  } else {
+    debug('Verification token mismatch');
+    res.sendStatus(404);
+  }
 });
 
-app.post('/addRole', (req, res) => {
+app.post('/removeRole', (req, res) => {
   // extract the slash command text, and trigger ID from payload
   const { text, trigger_id } = req.body;
   const reqBody = req.body;
   // Verify the signing secret
-  checkAdmin(reqBody.user_id, function callback (isAdmin) {
-    if (signature.isVerified(req)) {
-      // create the dialog payload - includes the dialog structure, Slack API token,
-      // and trigger ID
-      var message;
-      const splitText = splitFirstSpace(text);
-      if(isAdmin){
-        if(!!repo.checkRole(splitText[0])){
-          repo.addRole(splitText[0]);
-          message = `<@${reqBody.user_id}> role ${splitText[0]} successfully added`;
-        }
-        else{
-          message = `<@${reqBody.user_id}> role ${splitText[0]} exists`;
-        }
-      }
-      else{
-        message = `<@${reqBody.user_id}> please contact eboard to add a role`;
-      }
+  if (signature.isVerified(req)) {
+    // create the dialog payload - includes the dialog structure, Slack API token,
+    // and trigger ID
+    var message;
+    const splitText = splitFirstSpace(text);
 
-      axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
-        token: process.env.SLACK_ACCESS_TOKEN,
-        channel: reqBody.channel_id,
-        as_user: true,
-        text: message
-      })).then((result) => {
-        debug('sendConfirmation: %o', result.data);
-        res.send('');
-      }).catch((err) => {
-        debug('sendConfirmation error: %o', err);
-        console.error(err);
-      });
-    } else {
-      debug('Verification token mismatch');
-      res.sendStatus(404);
+    if(!repo.roleExists(splitText[0]) && repo.getUsersWithRole(splitText[0]).includes(reqBody.user_id)){
+      repo.removeRole(reqBody.user_id, splitText[0])
+      message = `<@${reqBody.user_id}> role ${splitText[0]} successfully removed`;
     }
-  });
+    else{
+      message = `<@${reqBody.user_id}> role ${splitText[0]} does not exist`;
+    }
+
+    axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+      token: process.env.SLACK_ACCESS_TOKEN,
+      channel: reqBody.user_id,
+      as_user: true,
+      text: message
+    })).then((result) => {
+      debug('sendConfirmation: %o', result.data);
+      res.send('');
+    }).catch((err) => {
+      debug('sendConfirmation error: %o', err);
+      console.error(err);
+    });
+  } else {
+    debug('Verification token mismatch');
+    res.sendStatus(404);
+  }
 });
 
-app.post('/roles',async (req, res) => {
+app.post('/myRoles', (req, res) => {
+  // extract the slash command text, and trigger ID from payload
+  const { text, trigger_id } = req.body;
+  const reqBody = req.body;
+  if (signature.isVerified(req)) {
+      // create the dialog payload - includes the dialog structure, Slack API token,
+      // and trigger ID;
+    var roles = repo.myRoles(reqBody.user_id);
+    axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+      token: process.env.SLACK_ACCESS_TOKEN,
+      channel: reqBody.user_id,
+      as_user: true,
+      text: `Your roles: ${roles.join(", ")}`
+    })).then((result) => {
+      debug('sendConfirmation: %o', result.data);
+      res.send('');
+    }).catch((err) => {
+      debug('sendConfirmation error: %o', err);
+      console.error(err);
+    });
+  } else {
+    debug('Verification token mismatch');
+    res.sendStatus(404);
+  }
+});
+
+app.post('/roles', (req, res) => {
   // extract the slash command text, and trigger ID from payload
   const { text, trigger_id } = req.body;
   const reqBody = req.body;
@@ -246,25 +207,121 @@ app.post('/roles',async (req, res) => {
   }
 });
 
-/*
- * Endpoint to receive the dialog submission. Checks the verification token
- * and creates a Helpdesk ticket
- */
-app.post('/interactive', (req, res) => {
-  const body = JSON.parse(req.body.payload);
 
-  // check that the verification token matches expected value
+app.post('/addRole', (req, res) => {
+  // extract the slash command text, and trigger ID from payload
+  const { text, trigger_id } = req.body;
+  const reqBody = req.body;
+  // Verify the signing secret
+  checkAdmin(reqBody.user_id, function callback (isAdmin) {
+    if (signature.isVerified(req)) {
+      // create the dialog payload - includes the dialog structure, Slack API token,
+      // and trigger ID
+      var message;
+      const splitText = splitFirstSpace(text);
+      if(isAdmin){
+        if(!repo.roleExists(splitText[0])){
+          repo.addRole(splitText[0]);
+          message = `<@${reqBody.user_id}> role ${splitText[0]} successfully added`;
+        }
+        else{
+          message = `<@${reqBody.user_id}> role ${splitText[0]} exists`;
+        }
+      }
+      else{
+        message = `<@${reqBody.user_id}> please contact eboard to add a role`;
+      }
+
+      axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+        token: process.env.SLACK_ACCESS_TOKEN,
+        channel: reqBody.user_id,
+        as_user: true,
+        text: message
+      })).then((result) => {
+        debug('sendConfirmation: %o', result.data);
+        res.send('');
+      }).catch((err) => {
+        debug('sendConfirmation error: %o', err);
+        console.error(err);
+      });
+    } else {
+      debug('Verification token mismatch');
+      res.sendStatus(404);
+    }
+  });
+});
+
+app.post('/deleteRole', (req, res) => {
+  // extract the slash command text, and trigger ID from payload
+  const { text, trigger_id } = req.body;
+  const reqBody = req.body;
+  // Verify the signing secret
+  checkAdmin(reqBody.user_id, function callback (isAdmin) {
+    if (signature.isVerified(req)) {
+      // create the dialog payload - includes the dialog structure, Slack API token,
+      // and trigger ID
+      var message;
+      const splitText = splitFirstSpace(text);
+      if(isAdmin){
+        if(!!repo.roleExists(splitText[0])){
+          repo.deleteRole(splitText[0]);
+          message = `<@${reqBody.user_id}> role ${splitText[0]} successfully deleted`;
+        }
+        else{
+          message = `<@${reqBody.user_id}> role ${splitText[0]} does not exist`;
+        }
+      }
+      else{
+        message = `<@${reqBody.user_id}> please contact eboard to delete a role`;
+      }
+
+      axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+        token: process.env.SLACK_ACCESS_TOKEN,
+        channel: reqBody.user_id,
+        as_user: true,
+        text: message
+      })).then((result) => {
+        debug('sendConfirmation: %o', result.data);
+        res.send('');
+      }).catch((err) => {
+        debug('sendConfirmation error: %o', err);
+        console.error(err);
+      });
+    } else {
+      debug('Verification token mismatch');
+      res.sendStatus(404);
+    }
+  });
+});
+
+app.post('/bothelp', (req, res) => {
+  // extract the slash command text, and trigger ID from payload
+  const { text, trigger_id } = req.body;
+  const reqBody = req.body;
   if (signature.isVerified(req)) {
-    debug(`Form submission received: ${body.submission.trigger_id}`);
-
-    // immediately respond with a empty 200 response to let
-    // Slack know the command was received
-    res.send('');
-
-    // create Helpdesk ticket
-    ticket.create(body.user.id, body.submission);
+      // create the dialog payload - includes the dialog structure, Slack API token,
+      // and trigger ID;
+    axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+      token: process.env.SLACK_ACCESS_TOKEN,
+      channel: reqBody.user_id,
+      as_user: true,
+      text: `Available commands:\n
+            /mentionRole {role} {message} - sends a message and mentions all users with that role\n
+            /roles - lists out all available roles\n
+            /myRoles - lists out all of your roles\n
+            /getRole {role} - assign a role to yourself\n
+            /removeRole {role} - removes a role from yourself\n
+            /addRole {role} - adds a new role (admin only)\n
+            /deleteRole {role} - deletes a role (admin only)`
+    })).then((result) => {
+      debug('sendConfirmation: %o', result.data);
+      res.send('');
+    }).catch((err) => {
+      debug('sendConfirmation error: %o', err);
+      console.error(err);
+    });
   } else {
-    debug('Token mismatch');
+    debug('Verification token mismatch');
     res.sendStatus(404);
   }
 });
