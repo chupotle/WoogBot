@@ -101,74 +101,145 @@ app.post('/mentionRole', (req, res) => {
   if (signature.isVerified(req)) {
     // create the dialog payload - includes the dialog structure, Slack API token,
     // and trigger ID
-    
+    const splitText = splitFirstSpace(text);
+    var message;
+    var attachment;
+    if(!!repo.checkRole(splitText[0])){
+      var userIdList = repo.getUsersWithRole(splitText[0]);
+      var append = !!userIdList ? userIdList.map(userId => "<@" + userId + ">").toString() : "";
+      console.log(append);
+      message = `<@${reqBody.user_id}> says:\n\n${splitText[1]}`;
+      attachment = JSON.stringify([
+        {
+          title: `@${splitText[0]}`,
+          text: append
+        },
+      ]);
+    }
+    else{
+      res.send("role not found");
+    } 
     axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
-    token: process.env.SLACK_ACCESS_TOKEN,
-    channel: reqBody.channel_id,
-    as_user: true,
-    text: `<@${reqBody.user_id}>`
+      token: process.env.SLACK_ACCESS_TOKEN,
+      channel: reqBody.channel_id,
+      as_user: true,
+      text: message,
+      attachments: attachment
     })).then((result) => {
-    debug('sendConfirmation: %o', result.data);
-  }).catch((err) => {
-    debug('sendConfirmation error: %o', err);
-    console.error(err);
-  });
+      debug('sendConfirmation: %o', result.data);
+      res.send('');
+    }).catch((err) => {
+      debug('sendConfirmation error: %o', err);
+      console.error(err);
+    });
   } else {
     debug('Verification token mismatch');
     res.sendStatus(404);
   }
+});
+
+app.post('/getRole', (req, res) => {
+  // extract the slash command text, and trigger ID from payload
+  const { text, trigger_id } = req.body;
+  const reqBody = req.body;
+  // Verify the signing secret
+  checkAdmin(reqBody.user_id, function callback (isAdmin) {
+    if (signature.isVerified(req)) {
+      // create the dialog payload - includes the dialog structure, Slack API token,
+      // and trigger ID
+      var message;
+      const splitText = splitFirstSpace(text);
+      
+      if(!!repo.checkRole(splitText[0])){
+        repo.giveRole(reqBody.user_id, splitText[0])
+        message = `<@${reqBody.user_id}> role ${splitText[0]} successfully added`;
+      }
+      else{
+        message = `<@${reqBody.user_id}> role ${splitText[0]} exists`;
+      }
+
+      axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+        token: process.env.SLACK_ACCESS_TOKEN,
+        channel: reqBody.user_id,
+        as_user: true,
+        text: message
+      })).then((result) => {
+        debug('sendConfirmation: %o', result.data);
+        res.send('');
+      }).catch((err) => {
+        debug('sendConfirmation error: %o', err);
+        console.error(err);
+      });
+    } else {
+      debug('Verification token mismatch');
+      res.sendStatus(404);
+    }
+  });
 });
 
 app.post('/addRole', (req, res) => {
   // extract the slash command text, and trigger ID from payload
   const { text, trigger_id } = req.body;
-  var roles = repo.listRoles();
   const reqBody = req.body;
   // Verify the signing secret
-  if (signature.isVerified(req)) {
-    // create the dialog payload - includes the dialog structure, Slack API token,
-    // and trigger ID
-    
-    axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
-    token: process.env.SLACK_ACCESS_TOKEN,
-    channel: reqBody.channel_id,
-    as_user: true,
-    text: `<@${reqBody.user_id}> ${roles.join()}`
-    })).then((result) => {
-    debug('sendConfirmation: %o', result.data);
-    res.send('');
-  }).catch((err) => {
-    debug('sendConfirmation error: %o', err);
-    console.error(err);
+  checkAdmin(reqBody.user_id, function callback (isAdmin) {
+    if (signature.isVerified(req)) {
+      // create the dialog payload - includes the dialog structure, Slack API token,
+      // and trigger ID
+      var message;
+      const splitText = splitFirstSpace(text);
+      if(isAdmin){
+        if(!!repo.checkRole(splitText[0])){
+          repo.addRole(splitText[0]);
+          message = `<@${reqBody.user_id}> role ${splitText[0]} successfully added`;
+        }
+        else{
+          message = `<@${reqBody.user_id}> role ${splitText[0]} exists`;
+        }
+      }
+      else{
+        message = `<@${reqBody.user_id}> please contact eboard to add a role`;
+      }
+
+      axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+        token: process.env.SLACK_ACCESS_TOKEN,
+        channel: reqBody.channel_id,
+        as_user: true,
+        text: message
+      })).then((result) => {
+        debug('sendConfirmation: %o', result.data);
+        res.send('');
+      }).catch((err) => {
+        debug('sendConfirmation error: %o', err);
+        console.error(err);
+      });
+    } else {
+      debug('Verification token mismatch');
+      res.sendStatus(404);
+    }
   });
-  } else {
-    debug('Verification token mismatch');
-    res.sendStatus(404);
-  }
 });
 
-app.post('/getRoles', (req, res) => {
+app.post('/roles',async (req, res) => {
   // extract the slash command text, and trigger ID from payload
   const { text, trigger_id } = req.body;
   const reqBody = req.body;
-  var roles = repo.listRoles();
-  // Verify the signing secret
   if (signature.isVerified(req)) {
-    // create the dialog payload - includes the dialog structure, Slack API token,
-    // and trigger ID
-    
+      // create the dialog payload - includes the dialog structure, Slack API token,
+      // and trigger ID;
+    var roles = repo.listRoles();
     axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
-    token: process.env.SLACK_ACCESS_TOKEN,
-    channel: reqBody.channel_id,
-    as_user: true,
-    text: `<@${reqBody.user_id}> ${JSON.stringify(roles)}`
+      token: process.env.SLACK_ACCESS_TOKEN,
+      channel: reqBody.user_id,
+      as_user: true,
+      text: `Available roles: ${roles.join(", ")}`
     })).then((result) => {
-    debug('sendConfirmation: %o', result.data);
-    res.send('');
-  }).catch((err) => {
-    debug('sendConfirmation error: %o', err);
-    console.error(err);
-  });
+      debug('sendConfirmation: %o', result.data);
+      res.send('');
+    }).catch((err) => {
+      debug('sendConfirmation error: %o', err);
+      console.error(err);
+    });
   } else {
     debug('Verification token mismatch');
     res.sendStatus(404);
@@ -199,6 +270,28 @@ app.post('/interactive', (req, res) => {
 });
 
 const server = app.listen(process.env.PORT || 5000, () => {
-  repo.listRoles();
   console.log('Express server listening on port %d in %s mode', server.address().port, app.settings.env);
 });
+
+function splitFirstSpace (str) {
+  var left = str.substr(0,str.indexOf(' '));
+  var right = str.substr(str.indexOf(' ')+1);
+  if(!left){
+    return [right, left];
+  }
+  else{
+    return [left, right];
+  }
+}
+
+function checkAdmin (user_id, callback) {
+  axios.get(`https://slack.com/api/users.info`, {
+    params: {
+      user: user_id,
+      token: process.env.SLACK_ACCESS_TOKEN
+    }
+  })
+    .then((result) => {
+      callback(result.data.user.is_admin);
+  });
+}
