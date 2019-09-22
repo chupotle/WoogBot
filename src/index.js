@@ -1,5 +1,4 @@
 require('dotenv').config();
-const sqlite3 = require('sqlite3').verbose();
 const axios = require('axios');
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -7,12 +6,11 @@ const qs = require('querystring');
 const ticket = require('./ticket');
 const signature = require('./verifySignature');
 const debug = require('debug')('slash-command-template:index');
+const repo = require('./repo')
 
 const apiUrl = 'https://slack.com/api';
 
 const app = express();
-var db    = require('./dbsetup').db;
-var createTables    = require('./dbsetup').createTables;
 /*
  * Parse application/x-www-form-urlencoded && application/json
  * Use body-parser's `verify` callback to export a parsed raw body
@@ -98,7 +96,6 @@ app.post('/command', (req, res) => {
 app.post('/mentionRole', (req, res) => {
   // extract the slash command text, and trigger ID from payload
   const { text, trigger_id } = req.body;
-  console.log(text);
   const reqBody = req.body;
   // Verify the signing secret
   if (signature.isVerified(req)) {
@@ -122,6 +119,61 @@ app.post('/mentionRole', (req, res) => {
   }
 });
 
+app.post('/addRole', (req, res) => {
+  // extract the slash command text, and trigger ID from payload
+  const { text, trigger_id } = req.body;
+  var roles = repo.listRoles();
+  const reqBody = req.body;
+  // Verify the signing secret
+  if (signature.isVerified(req)) {
+    // create the dialog payload - includes the dialog structure, Slack API token,
+    // and trigger ID
+    
+    axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+    token: process.env.SLACK_ACCESS_TOKEN,
+    channel: reqBody.channel_id,
+    as_user: true,
+    text: `<@${reqBody.user_id}> ${roles.join()}`
+    })).then((result) => {
+    debug('sendConfirmation: %o', result.data);
+    res.send('');
+  }).catch((err) => {
+    debug('sendConfirmation error: %o', err);
+    console.error(err);
+  });
+  } else {
+    debug('Verification token mismatch');
+    res.sendStatus(404);
+  }
+});
+
+app.post('/getRoles', (req, res) => {
+  // extract the slash command text, and trigger ID from payload
+  const { text, trigger_id } = req.body;
+  const reqBody = req.body;
+  var roles = repo.listRoles();
+  // Verify the signing secret
+  if (signature.isVerified(req)) {
+    // create the dialog payload - includes the dialog structure, Slack API token,
+    // and trigger ID
+    
+    axios.post('https://slack.com/api/chat.postMessage', qs.stringify({
+    token: process.env.SLACK_ACCESS_TOKEN,
+    channel: reqBody.channel_id,
+    as_user: true,
+    text: `<@${reqBody.user_id}> ${JSON.stringify(roles)}`
+    })).then((result) => {
+    debug('sendConfirmation: %o', result.data);
+    res.send('');
+  }).catch((err) => {
+    debug('sendConfirmation error: %o', err);
+    console.error(err);
+  });
+  } else {
+    debug('Verification token mismatch');
+    res.sendStatus(404);
+  }
+});
 
 /*
  * Endpoint to receive the dialog submission. Checks the verification token
@@ -147,14 +199,6 @@ app.post('/interactive', (req, res) => {
 });
 
 const server = app.listen(process.env.PORT || 5000, () => {
-  let db = new sqlite3.Database('../db/woogBot.db', (err) => {
-    if (err) {
-      console.error(err.message);
-    }
-    else{
-      console.log('Connected to the woogbot database.');
-      
-    }
-  });
+  repo.listRoles();
   console.log('Express server listening on port %d in %s mode', server.address().port, app.settings.env);
 });
