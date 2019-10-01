@@ -49,12 +49,12 @@ app.post('/mentionRole', (req, res) => {
     if(!!repo.roleExists(splitText[0])){
       var userIdList = repo.getUsersWithRole(splitText[0]);
       var append = !!userIdList ? userIdList.map(userId => "<@" + userId + ">").toString() : "";
-      console.log(append);
-      message = `<@${reqBody.user_id}> says:\n\n${splitText[1]}`;
+      message = `<@${reqBody.user_id}> says:`;
       attachment = JSON.stringify([
         {
           title: `@${splitText[0]}`,
-          text: append
+          text: splitText[1],
+          footer: append,
         },
       ]);
     }
@@ -69,6 +69,7 @@ app.post('/mentionRole', (req, res) => {
       text: message,
       attachments: attachment
     })).then((result) => {
+      console.log(result);
       debug('sendConfirmation: %o', result.data);
       res.send('');
     }).catch((err) => {

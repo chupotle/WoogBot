@@ -13,7 +13,6 @@ function listRoles()  {
 function roleExists(role_name)  {
   const sql = db.prepare(`SELECT role_name FROM roles WHERE role_name = ?`);
   const res = sql.get(role_name);
-  console.log(!!res);
   return res;
 };
 
