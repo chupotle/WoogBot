@@ -6,7 +6,6 @@ function listRoles()  {
   for (const role of sql.iterate()) {
     roles.push(role.role_name);
   }
-  console.log(roles);
   return roles;
 };
 
