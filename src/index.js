@@ -7,8 +7,6 @@ const signature = require('./verifySignature');
 const debug = require('debug')('slash-command-template:index');
 const repo = require('./repo')
 
-const apiUrl = 'https://slack.com/api';
-
 const app = express();
 /*
  * Parse application/x-www-form-urlencoded && application/json
@@ -51,20 +49,47 @@ app.post('/mentionRole', (req, res) => {
     if(!!repo.roleExists(roleName)){
       var userIdList = repo.getUsersWithRole(roleName);
       var append = !!userIdList ? userIdList.map(userId => "<@" + userId + ">").toString() : "";
-      message = `<@${reqBody.user_id}> says:`;
-      attachment = JSON.stringify([
-        {
-          text: splitText[1],
-          footer: append,
-        },
-      ]);
+      message = `<@${reqBody.user_id}> says:
+      ${splitText[1]}\n
+      ${append}
+      `;
+          var blocks = [];
+      var headerBlock = {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": `<@${reqBody.user_id}> says:`
+        }
+      };
+      blocks.push(headerBlock);
+      var messageBlock = {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": splitText[1]
+        }
+      };
+      blocks.push(messageBlock);
+      var dividerBlock = {
+        "type": "divider"
+      }
+      blocks.push(dividerBlock);
+      var mentionBlock = {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": append
+          }
+        ]
+      };
+      blocks.push(mentionBlock);
+      sendMessage(res, reqBody.channel_id, message, blocks, null);
     }
     else{
       res.send("role not found");
       throw "role not found";
-    } 
-    
-    sendMessage(res, reqBody.channel_id, message, null, attachment);
+    }
   } else {
     debug('Verification token mismatch');
     res.sendStatus(404);
@@ -309,18 +334,22 @@ function getChannelIdForUser (user_id, callback) {
 }
 
 function sendMessage (res, channel, text, block, attachments) {
+  var tokenStr = process.env.SLACK_ACCESS_TOKEN;
   var message = {
-    token: process.env.SLACK_ACCESS_TOKEN,
     channel: channel,
     as_user: true,
-    text: text,
-    block: block,
-    attachments: attachments
+    text: text
   };
-  
-  axios.post('https://slack.com/api/chat.postMessage', qs.stringify(message)).then((result) => {
+  if(!!block){
+    message['blocks'] = block;
+  }
+  if(!!attachments){
+    message['attachments'] = attachments;
+  }
+  axios.post('https://slack.com/api/chat.postMessage', message, { headers: {"Authorization" : `Bearer ${tokenStr}`} }).then((result) => {
     debug('sendConfirmation: %o', result.data);
     res.send('');
+    console.log(result)
   }).catch((err) => {
     debug('sendConfirmation error: %o', err);
     console.error(err);
